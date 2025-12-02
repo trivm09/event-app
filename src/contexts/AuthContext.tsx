@@ -1,7 +1,7 @@
-// Context để quản lý trạng thái authentication toàn ứng dụng
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { supabase } from '../config/supabase';
 import { profileService } from '../services/profile.service';
+import { authService } from '../services/auth.service';
 import type { LoginCredentials, UserProfile, AuthContextType } from '../types/auth.types';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -59,27 +59,27 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     };
   }, [loadUserProfile]);
 
-  const login = useCallback(async ({ email, password }: LoginCredentials) => {
+  const login = useCallback(async (credentials: LoginCredentials) => {
     try {
       setIsLoading(true);
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const result = await authService.login(credentials);
 
-      if (error) {
-        return { success: false, error };
+      if (!result.success) {
+        return { success: false, error: result.error };
       }
 
-      if (data.user) {
-        await loadUserProfile(data.user.id);
+      if (result.data?.user) {
+        await loadUserProfile(result.data.user.id);
       }
 
-      return { success: true, data };
+      return { success: true, data: result.data };
     } catch (err) {
       console.error('[AuthContext] Login error:', err);
-      return { success: false, error: err };
+      return {
+        success: false,
+        error: { message: 'Đã xảy ra lỗi không mong muốn' }
+      };
     } finally {
       setIsLoading(false);
     }
@@ -87,8 +87,14 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const logout = useCallback(async () => {
     try {
-      await supabase.auth.signOut();
-      setUser(null);
+      const result = await authService.logout();
+
+      if (result.success) {
+        setUser(null);
+      } else {
+        console.error('[AuthContext] Logout error:', result.error);
+        throw new Error(result.error?.message || 'Đăng xuất thất bại');
+      }
     } catch (err) {
       console.error('[AuthContext] Logout error:', err);
       throw err;
