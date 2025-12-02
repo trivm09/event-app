@@ -1,46 +1,89 @@
 import { supabase } from '../config/supabase';
 import { ValidationService } from '../utils/validation.utils';
 import { RateLimitService } from '../utils/rateLimit.utils';
-import type { LoginCredentials } from '../types/auth.types';
-
-interface AuthResult<T = any> {
-  success: boolean;
-  data?: T;
-  error?: {
-    message: string;
-    code?: string;
-  };
-}
+import { AUTH_ERROR_MESSAGES, AUTH_ERROR_PATTERNS } from '../config/auth.config';
+import { RATE_LIMIT_MESSAGES } from '../config/rateLimit.config';
+import { AuthErrorCode, type LoginCredentials, type AuthResult, type AuthError } from '../types/auth.types';
+import type { AuthError as SupabaseAuthError } from '@supabase/supabase-js';
 
 export class AuthService {
+  private createErrorResult(message: string, code: AuthErrorCode | string): AuthResult {
+    return {
+      success: false,
+      error: { message, code },
+    };
+  }
+
+  private createSuccessResult<T>(data: T): AuthResult<T> {
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  private mapSupabaseError(error: SupabaseAuthError): AuthError {
+    const errorMessage = error.message.toLowerCase();
+
+    if (errorMessage.includes(AUTH_ERROR_PATTERNS.INVALID_CREDENTIALS.toLowerCase())) {
+      return {
+        message: AUTH_ERROR_MESSAGES.INVALID_CREDENTIALS,
+        code: AuthErrorCode.INVALID_CREDENTIALS,
+      };
+    }
+
+    if (errorMessage.includes(AUTH_ERROR_PATTERNS.EMAIL_NOT_CONFIRMED.toLowerCase())) {
+      return {
+        message: AUTH_ERROR_MESSAGES.EMAIL_NOT_CONFIRMED,
+        code: AuthErrorCode.EMAIL_NOT_CONFIRMED,
+      };
+    }
+
+    if (errorMessage.includes(AUTH_ERROR_PATTERNS.USER_NOT_FOUND.toLowerCase())) {
+      return {
+        message: AUTH_ERROR_MESSAGES.USER_NOT_FOUND,
+        code: AuthErrorCode.USER_NOT_FOUND,
+      };
+    }
+
+    return {
+      message: AUTH_ERROR_MESSAGES.LOGIN_FAILED,
+      code: error.status?.toString() || AuthErrorCode.UNEXPECTED_ERROR,
+    };
+  }
+
+  private handleRateLimitCheck(sanitizedEmail: string): AuthResult | null {
+    const rateLimit = RateLimitService.checkRateLimit(sanitizedEmail);
+
+    if (!rateLimit.allowed) {
+      const resetTime = rateLimit.resetTime
+        ? RateLimitService.formatResetTime(rateLimit.resetTime)
+        : RATE_LIMIT_MESSAGES.DEFAULT_RESET_TIME;
+
+      return this.createErrorResult(
+        RATE_LIMIT_MESSAGES.EXCEEDED(resetTime),
+        AuthErrorCode.RATE_LIMIT_EXCEEDED
+      );
+    }
+
+    return null;
+  }
+
   async login(credentials: LoginCredentials): Promise<AuthResult> {
     const { email, password } = credentials;
 
     const emailValidation = ValidationService.validateEmail(email);
     if (!emailValidation.isValid) {
-      return {
-        success: false,
-        error: {
-          message: emailValidation.error || 'Email không hợp lệ',
-          code: 'VALIDATION_ERROR',
-        },
-      };
+      return this.createErrorResult(
+        emailValidation.error || AUTH_ERROR_MESSAGES.LOGIN_FAILED,
+        AuthErrorCode.VALIDATION_ERROR
+      );
     }
 
     const sanitizedEmail = ValidationService.sanitizeEmail(email);
 
-    const rateLimit = RateLimitService.checkRateLimit(sanitizedEmail);
-    if (!rateLimit.allowed) {
-      const resetTime = rateLimit.resetTime
-        ? RateLimitService.formatResetTime(rateLimit.resetTime)
-        : '30 phút';
-      return {
-        success: false,
-        error: {
-          message: `Quá nhiều lần đăng nhập thất bại. Vui lòng thử lại sau ${resetTime}`,
-          code: 'RATE_LIMIT_EXCEEDED',
-        },
-      };
+    const rateLimitResult = this.handleRateLimitCheck(sanitizedEmail);
+    if (rateLimitResult) {
+      return rateLimitResult;
     }
 
     try {
@@ -51,42 +94,18 @@ export class AuthService {
 
       if (error) {
         RateLimitService.recordFailedAttempt(sanitizedEmail);
-
-        let errorMessage = 'Đăng nhập thất bại';
-
-        if (error.message.includes('Invalid login credentials')) {
-          errorMessage = 'Email hoặc mật khẩu không đúng';
-        } else if (error.message.includes('Email not confirmed')) {
-          errorMessage = 'Email chưa được xác nhận';
-        } else if (error.message.includes('User not found')) {
-          errorMessage = 'Tài khoản không tồn tại';
-        }
-
-        return {
-          success: false,
-          error: {
-            message: errorMessage,
-            code: error.status?.toString(),
-          },
-        };
+        const mappedError = this.mapSupabaseError(error);
+        return this.createErrorResult(mappedError.message, mappedError.code);
       }
 
       RateLimitService.clearAttempts(sanitizedEmail);
-
-      return {
-        success: true,
-        data,
-      };
+      return this.createSuccessResult(data);
     } catch (err: any) {
       RateLimitService.recordFailedAttempt(sanitizedEmail);
-
-      return {
-        success: false,
-        error: {
-          message: 'Đã xảy ra lỗi khi đăng nhập. Vui lòng thử lại',
-          code: 'UNEXPECTED_ERROR',
-        },
-      };
+      return this.createErrorResult(
+        AUTH_ERROR_MESSAGES.UNEXPECTED_ERROR,
+        AuthErrorCode.UNEXPECTED_ERROR
+      );
     }
   }
 
@@ -95,82 +114,58 @@ export class AuthService {
       const { error } = await supabase.auth.signOut();
 
       if (error) {
-        return {
-          success: false,
-          error: {
-            message: 'Đăng xuất thất bại',
-            code: error.status?.toString(),
-          },
-        };
+        return this.createErrorResult(
+          AUTH_ERROR_MESSAGES.LOGOUT_FAILED,
+          error.status?.toString() || AuthErrorCode.UNEXPECTED_ERROR
+        );
       }
 
-      return { success: true };
+      return this.createSuccessResult(null);
     } catch (err: any) {
-      return {
-        success: false,
-        error: {
-          message: 'Đã xảy ra lỗi khi đăng xuất',
-          code: 'UNEXPECTED_ERROR',
-        },
-      };
+      return this.createErrorResult(
+        AUTH_ERROR_MESSAGES.UNEXPECTED_ERROR,
+        AuthErrorCode.UNEXPECTED_ERROR
+      );
     }
   }
 
-  async getCurrentSession() {
+  async getCurrentSession(): Promise<AuthResult> {
     try {
       const { data, error } = await supabase.auth.getSession();
 
       if (error) {
-        return {
-          success: false,
-          error: {
-            message: 'Không thể lấy thông tin phiên đăng nhập',
-            code: error.status?.toString(),
-          },
-        };
+        return this.createErrorResult(
+          AUTH_ERROR_MESSAGES.SESSION_FETCH_FAILED,
+          error.status?.toString() || AuthErrorCode.UNEXPECTED_ERROR
+        );
       }
 
-      return {
-        success: true,
-        data: data.session,
-      };
+      return this.createSuccessResult(data.session);
     } catch (err: any) {
-      return {
-        success: false,
-        error: {
-          message: 'Đã xảy ra lỗi khi lấy thông tin phiên đăng nhập',
-          code: 'UNEXPECTED_ERROR',
-        },
-      };
+      return this.createErrorResult(
+        AUTH_ERROR_MESSAGES.UNEXPECTED_ERROR,
+        AuthErrorCode.UNEXPECTED_ERROR
+      );
     }
   }
 
-  async refreshSession() {
+  async refreshSession(): Promise<AuthResult> {
     try {
       const { data, error } = await supabase.auth.refreshSession();
 
       if (error) {
-        return {
-          success: false,
-          error: {
-            message: 'Không thể làm mới phiên đăng nhập',
-            code: error.status?.toString(),
-          },
-        };
+        return this.createErrorResult(
+          AUTH_ERROR_MESSAGES.SESSION_REFRESH_FAILED,
+          error.status?.toString() || AuthErrorCode.UNEXPECTED_ERROR
+        );
       }
 
-      return {
-        success: true,
-        data: data.session,
-      };
+      return this.createSuccessResult(data.session);
     } catch (err: any) {
-      return {
-        success: false,
-        error: {
-          message: 'Đã xảy ra lỗi khi làm mới phiên đăng nhập',
-          code: 'UNEXPECTED_ERROR',
-        },
-      };
+      return this.createErrorResult(
+        AUTH_ERROR_MESSAGES.UNEXPECTED_ERROR,
+        AuthErrorCode.UNEXPECTED_ERROR
+      );
     }
   }
 }

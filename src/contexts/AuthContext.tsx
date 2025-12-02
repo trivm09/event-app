@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode, useCallback 
 import { supabase } from '../config/supabase';
 import { profileService } from '../services/profile.service';
 import { authService } from '../services/auth.service';
-import type { LoginCredentials, UserProfile, AuthContextType } from '../types/auth.types';
+import { AuthErrorCode, type LoginCredentials, type UserProfile, type AuthContextType, type AuthResult } from '../types/auth.types';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -59,26 +59,29 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     };
   }, [loadUserProfile]);
 
-  const login = useCallback(async (credentials: LoginCredentials) => {
+  const login = useCallback(async (credentials: LoginCredentials): Promise<AuthResult> => {
     try {
       setIsLoading(true);
 
       const result = await authService.login(credentials);
 
       if (!result.success) {
-        return { success: false, error: result.error };
+        return result;
       }
 
       if (result.data?.user) {
         await loadUserProfile(result.data.user.id);
       }
 
-      return { success: true, data: result.data };
+      return result;
     } catch (err) {
       console.error('[AuthContext] Login error:', err);
       return {
         success: false,
-        error: { message: 'Đã xảy ra lỗi không mong muốn' }
+        error: {
+          message: 'Đã xảy ra lỗi không mong muốn',
+          code: AuthErrorCode.UNEXPECTED_ERROR,
+        },
       };
     } finally {
       setIsLoading(false);

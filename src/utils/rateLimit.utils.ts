@@ -1,71 +1,86 @@
-interface RateLimitEntry {
-  attempts: number;
-  firstAttemptTime: number;
-  blockedUntil?: number;
-}
+import { RATE_LIMIT_CONFIG, TIME_UNITS } from '../config/rateLimit.config';
+import type { RateLimitEntry, RateLimitCheckResult } from '../types/rateLimit.types';
 
 export class RateLimitService {
   private static readonly attempts = new Map<string, RateLimitEntry>();
-  private static readonly MAX_ATTEMPTS = 5;
-  private static readonly WINDOW_MS = 15 * 60 * 1000;
-  private static readonly BLOCK_DURATION_MS = 30 * 60 * 1000;
 
-  static checkRateLimit(identifier: string): {
-    allowed: boolean;
-    remainingAttempts?: number;
-    resetTime?: number;
-  } {
+  private static isCurrentlyBlocked(entry: RateLimitEntry, now: number): boolean {
+    return !!entry.blockedUntil && entry.blockedUntil > now;
+  }
+
+  private static hasBlockExpired(entry: RateLimitEntry, now: number): boolean {
+    return !!entry.blockedUntil && entry.blockedUntil <= now;
+  }
+
+  private static isWindowExpired(entry: RateLimitEntry, now: number): boolean {
+    return now - entry.firstAttemptTime > RATE_LIMIT_CONFIG.WINDOW_DURATION_MS;
+  }
+
+  private static createNewEntry(now: number): RateLimitEntry {
+    return {
+      attempts: 1,
+      firstAttemptTime: now,
+    };
+  }
+
+  private static createAllowedResult(remainingAttempts: number): RateLimitCheckResult {
+    return {
+      allowed: true,
+      remainingAttempts,
+    };
+  }
+
+  private static createBlockedResult(resetTime: number): RateLimitCheckResult {
+    return {
+      allowed: false,
+      resetTime,
+    };
+  }
+
+  private static resetEntry(identifier: string, now: number): void {
+    this.attempts.set(identifier, this.createNewEntry(now));
+  }
+
+  private static incrementAttempts(identifier: string, entry: RateLimitEntry): void {
+    entry.attempts += 1;
+    this.attempts.set(identifier, entry);
+  }
+
+  private static blockIdentifier(identifier: string, entry: RateLimitEntry, now: number): void {
+    entry.blockedUntil = now + RATE_LIMIT_CONFIG.BLOCK_DURATION_MS;
+    this.attempts.set(identifier, entry);
+  }
+
+  static checkRateLimit(identifier: string): RateLimitCheckResult {
     const now = Date.now();
     const entry = this.attempts.get(identifier);
 
     if (!entry) {
-      this.attempts.set(identifier, {
-        attempts: 1,
-        firstAttemptTime: now,
-      });
-      return { allowed: true, remainingAttempts: this.MAX_ATTEMPTS - 1 };
+      this.resetEntry(identifier, now);
+      return this.createAllowedResult(RATE_LIMIT_CONFIG.MAX_ATTEMPTS - 1);
     }
 
-    if (entry.blockedUntil && entry.blockedUntil > now) {
-      return {
-        allowed: false,
-        resetTime: entry.blockedUntil,
-      };
+    if (this.isCurrentlyBlocked(entry, now)) {
+      return this.createBlockedResult(entry.blockedUntil!);
     }
 
-    if (entry.blockedUntil && entry.blockedUntil <= now) {
-      this.attempts.delete(identifier);
-      this.attempts.set(identifier, {
-        attempts: 1,
-        firstAttemptTime: now,
-      });
-      return { allowed: true, remainingAttempts: this.MAX_ATTEMPTS - 1 };
+    if (this.hasBlockExpired(entry, now)) {
+      this.resetEntry(identifier, now);
+      return this.createAllowedResult(RATE_LIMIT_CONFIG.MAX_ATTEMPTS - 1);
     }
 
-    if (now - entry.firstAttemptTime > this.WINDOW_MS) {
-      this.attempts.set(identifier, {
-        attempts: 1,
-        firstAttemptTime: now,
-      });
-      return { allowed: true, remainingAttempts: this.MAX_ATTEMPTS - 1 };
+    if (this.isWindowExpired(entry, now)) {
+      this.resetEntry(identifier, now);
+      return this.createAllowedResult(RATE_LIMIT_CONFIG.MAX_ATTEMPTS - 1);
     }
 
-    if (entry.attempts >= this.MAX_ATTEMPTS) {
-      entry.blockedUntil = now + this.BLOCK_DURATION_MS;
-      this.attempts.set(identifier, entry);
-      return {
-        allowed: false,
-        resetTime: entry.blockedUntil,
-      };
+    if (entry.attempts >= RATE_LIMIT_CONFIG.MAX_ATTEMPTS) {
+      this.blockIdentifier(identifier, entry, now);
+      return this.createBlockedResult(entry.blockedUntil!);
     }
 
-    entry.attempts += 1;
-    this.attempts.set(identifier, entry);
-
-    return {
-      allowed: true,
-      remainingAttempts: this.MAX_ATTEMPTS - entry.attempts,
-    };
+    this.incrementAttempts(identifier, entry);
+    return this.createAllowedResult(RATE_LIMIT_CONFIG.MAX_ATTEMPTS - entry.attempts);
   }
 
   static recordFailedAttempt(identifier: string): void {
@@ -78,26 +93,46 @@ export class RateLimitService {
 
   static cleanup(): void {
     const now = Date.now();
+    const extendedWindow = RATE_LIMIT_CONFIG.WINDOW_DURATION_MS * RATE_LIMIT_CONFIG.EXTENDED_WINDOW_MULTIPLIER;
+
     for (const [key, entry] of this.attempts.entries()) {
-      if (
+      const shouldRemoveBlockedEntry =
         entry.blockedUntil &&
         entry.blockedUntil <= now &&
-        now - entry.blockedUntil > this.WINDOW_MS
-      ) {
-        this.attempts.delete(key);
-      } else if (
+        now - entry.blockedUntil > RATE_LIMIT_CONFIG.WINDOW_DURATION_MS;
+
+      const shouldRemoveExpiredEntry =
         !entry.blockedUntil &&
-        now - entry.firstAttemptTime > this.WINDOW_MS * 2
-      ) {
+        now - entry.firstAttemptTime > extendedWindow;
+
+      if (shouldRemoveBlockedEntry || shouldRemoveExpiredEntry) {
         this.attempts.delete(key);
       }
     }
   }
 
   static formatResetTime(resetTime: number): string {
-    const minutes = Math.ceil((resetTime - Date.now()) / 60000);
-    return minutes > 1 ? `${minutes} phút` : '1 phút';
+    const millisUntilReset = resetTime - Date.now();
+    const minutes = Math.ceil(millisUntilReset / TIME_UNITS.MILLISECONDS_PER_MINUTE);
+
+    if (minutes <= 1) {
+      return TIME_UNITS.SINGLE_MINUTE;
+    }
+
+    return `${minutes} ${TIME_UNITS.MINUTES_SUFFIX}`;
+  }
+
+  static getAttemptCount(identifier: string): number {
+    return this.attempts.get(identifier)?.attempts ?? 0;
+  }
+
+  static isBlocked(identifier: string): boolean {
+    const entry = this.attempts.get(identifier);
+    if (!entry) return false;
+    return this.isCurrentlyBlocked(entry, Date.now());
   }
 }
 
-setInterval(() => RateLimitService.cleanup(), 60000);
+if (typeof window !== 'undefined') {
+  setInterval(() => RateLimitService.cleanup(), RATE_LIMIT_CONFIG.CLEANUP_INTERVAL_MS);
+}
