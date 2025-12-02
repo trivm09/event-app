@@ -1,8 +1,10 @@
 import { RATE_LIMIT_CONFIG, TIME_UNITS } from '../config/rateLimit.config';
+import { RATE_LIMITS } from '../config/runway.config';
 import type { RateLimitEntry, RateLimitCheckResult } from '../types/rateLimit.types';
 
 export class RateLimitService {
   private static readonly attempts = new Map<string, RateLimitEntry>();
+  private static readonly imageGenerations = new Map<string, number[]>();
 
   private static isCurrentlyBlocked(entry: RateLimitEntry, now: number): boolean {
     return !!entry.blockedUntil && entry.blockedUntil > now;
@@ -130,6 +132,61 @@ export class RateLimitService {
     const entry = this.attempts.get(identifier);
     if (!entry) return false;
     return this.isCurrentlyBlocked(entry, Date.now());
+  }
+
+  static checkImageGenerationLimit(userId: string): { allowed: boolean; remainingGenerations: number; resetTime?: number } {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60000;
+
+    let timestamps = this.imageGenerations.get(userId) || [];
+    timestamps = timestamps.filter(time => time > oneMinuteAgo);
+
+    const currentCount = timestamps.length;
+    const allowed = currentCount < RATE_LIMITS.GENERATIONS_PER_MINUTE;
+
+    if (allowed) {
+      timestamps.push(now);
+      this.imageGenerations.set(userId, timestamps);
+    }
+
+    return {
+      allowed,
+      remainingGenerations: Math.max(0, RATE_LIMITS.GENERATIONS_PER_MINUTE - currentCount),
+      resetTime: timestamps.length > 0 ? timestamps[0] + 60000 : undefined,
+    };
+  }
+
+  static getConcurrentGenerations(userId: string): number {
+    const count = this.imageGenerations.get(`${userId}_concurrent`)?.length || 0;
+    return count;
+  }
+
+  static addConcurrentGeneration(userId: string): boolean {
+    const key = `${userId}_concurrent`;
+    const concurrent = this.imageGenerations.get(key) || [];
+
+    if (concurrent.length >= RATE_LIMITS.CONCURRENT_GENERATIONS) {
+      return false;
+    }
+
+    concurrent.push(Date.now());
+    this.imageGenerations.set(key, concurrent);
+    return true;
+  }
+
+  static removeConcurrentGeneration(userId: string): void {
+    const key = `${userId}_concurrent`;
+    const concurrent = this.imageGenerations.get(key) || [];
+
+    if (concurrent.length > 0) {
+      concurrent.pop();
+      this.imageGenerations.set(key, concurrent);
+    }
+  }
+
+  static clearImageGenerationLimits(userId: string): void {
+    this.imageGenerations.delete(userId);
+    this.imageGenerations.delete(`${userId}_concurrent`);
   }
 }
 
