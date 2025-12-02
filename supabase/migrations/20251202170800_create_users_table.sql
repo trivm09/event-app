@@ -3,10 +3,10 @@
 
   ## Overview
   This migration creates the complete user authentication and profile management system
-  with security measures, including the profiles table and Row Level Security policies.
+  with security measures, including the users table and Row Level Security policies.
 
   ## 1. New Tables
-    - `profiles`
+    - `users`
       - `id` (uuid, primary key) - Links to auth.users
       - `email` (text, unique, not null) - User's email address
       - `full_name` (text, not null) - User's full display name
@@ -15,10 +15,10 @@
       - `updated_at` (timestamptz, default now()) - Last profile update timestamp
 
   ## 2. Security Measures
-    - Enable Row Level Security (RLS) on profiles table
+    - Enable Row Level Security (RLS) on users table
     - Create SELECT policy: Users can view their own profile
     - Create UPDATE policy: Users can update their own profile
-    - Create INSERT policy: Authenticated users can create their profile (one-time)
+    - CREATE INSERT policy: Authenticated users can create their profile (one-time)
     - Admin users cannot be modified through standard policies
 
   ## 3. Triggers
@@ -32,8 +32,8 @@
     - All user data is protected by RLS - no public access
 */
 
--- Create profiles table
-CREATE TABLE IF NOT EXISTS profiles (
+-- Create users table
+CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email text UNIQUE NOT NULL,
   full_name text NOT NULL DEFAULT '',
@@ -43,36 +43,36 @@ CREATE TABLE IF NOT EXISTS profiles (
 );
 
 -- Enable Row Level Security
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 
 -- Policy: Users can view their own profile
 CREATE POLICY "Users can view own profile"
-  ON profiles
+  ON users
   FOR SELECT
   TO authenticated
   USING (auth.uid() = id);
 
 -- Policy: Users can update their own profile (except admin status)
 CREATE POLICY "Users can update own profile"
-  ON profiles
+  ON users
   FOR UPDATE
   TO authenticated
   USING (auth.uid() = id)
   WITH CHECK (
-    auth.uid() = id 
-    AND is_admin = (SELECT is_admin FROM profiles WHERE id = auth.uid())
+    auth.uid() = id
+    AND is_admin = (SELECT is_admin FROM users WHERE id = auth.uid())
   );
 
 -- Policy: Authenticated users can insert their profile once
 CREATE POLICY "Users can create own profile"
-  ON profiles
+  ON users
   FOR INSERT
   TO authenticated
   WITH CHECK (auth.uid() = id);
 
 -- Policy: Users can delete their own profile
 CREATE POLICY "Users can delete own profile"
-  ON profiles
+  ON users
   FOR DELETE
   TO authenticated
   USING (auth.uid() = id);
@@ -87,9 +87,9 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Trigger to update updated_at on profile changes
-DROP TRIGGER IF EXISTS update_profiles_updated_at ON profiles;
-CREATE TRIGGER update_profiles_updated_at
-  BEFORE UPDATE ON profiles
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
+CREATE TRIGGER update_users_updated_at
+  BEFORE UPDATE ON users
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
@@ -97,7 +97,7 @@ CREATE TRIGGER update_profiles_updated_at
 CREATE OR REPLACE FUNCTION create_profile_for_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name)
+  INSERT INTO public.users (id, email, full_name)
   VALUES (
     NEW.id,
     NEW.email,
@@ -115,5 +115,5 @@ CREATE TRIGGER on_auth_user_created
   EXECUTE FUNCTION create_profile_for_new_user();
 
 -- Create indexes for better query performance
-CREATE INDEX IF NOT EXISTS profiles_email_idx ON profiles(email);
-CREATE INDEX IF NOT EXISTS profiles_is_admin_idx ON profiles(is_admin);
+CREATE INDEX IF NOT EXISTS users_email_idx ON users(email);
+CREATE INDEX IF NOT EXISTS users_is_admin_idx ON users(is_admin);

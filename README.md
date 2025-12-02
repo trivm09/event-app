@@ -167,10 +167,8 @@ The project includes automated database migrations. Apply them in order:
 
    Execute these migration files located in `supabase/migrations/`:
 
-   - `20251202163141_create_profiles_table.sql` - Creates users table with RLS
-   - `20251202163650_rename_profiles_to_user.sql` - Renames table
-   - `20251202163847_rename_user_to_users.sql` - Final table name
-   - `fix_security_issues.sql` - Optimizes RLS and security
+   - `20251202170800_create_users_table.sql` - Creates users table with RLS policies
+   - `20251202165511_fix_security_issues.sql` - Optimizes RLS and security
 
 ### Database Schema
 
