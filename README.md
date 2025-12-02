@@ -600,6 +600,17 @@ SOFTWARE.
 
 ## Changelog
 
+### Version 1.0.1 (2025-12-02)
+
+**Changed**
+- Consolidated database migrations from 4 files to 2 files
+- Removed redundant table rename migrations
+- Updated migration documentation
+
+**Migrations**
+- `20251202170800_create_users_table.sql` - Initial users table setup
+- `20251202165511_fix_security_issues.sql` - Security optimizations
+
 ### Version 1.0.0 (2024-12-02)
 
 **Added**
