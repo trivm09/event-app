@@ -6,7 +6,7 @@ class ProfileService {
   async fetchUserProfile(userId: string): Promise<UserProfile | null> {
     try {
       const { data, error } = await supabase
-        .from('profiles')
+        .from('user')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
@@ -26,7 +26,7 @@ class ProfileService {
   async updateProfile(userId: string, updates: Partial<UserProfile>): Promise<boolean> {
     try {
       const { error } = await supabase
-        .from('profiles')
+        .from('user')
         .update(updates)
         .eq('id', userId);
 
