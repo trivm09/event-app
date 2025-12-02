@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { InputField } from './InputField';
 import { ErrorAlert } from './ui/ErrorAlert';
 import { useAuthContext } from '../contexts/AuthContext';
-import { STYLES, MESSAGES, ROUTES } from '../constants';
+import { STYLES, MESSAGES } from '../constants';
 
 export const LoginForm = () => {
   const [email, setEmail] = useState('');
@@ -22,7 +22,7 @@ export const LoginForm = () => {
     const result = await login({ email, password });
 
     if (result.success) {
-      navigate(ROUTES.admin);
+      navigate('/generate');
     } else {
       setError(result.error?.message || MESSAGES.errors.loginFailed);
     }
