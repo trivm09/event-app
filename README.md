@@ -1,6 +1,6 @@
-# Secure Authentication System with Admin Access Control
+# AI Image Generator with Runway Gen-4
 
-A production-ready authentication system built with React, TypeScript, Vite, and Supabase. Features secure user authentication, role-based access control, rate limiting, and comprehensive input validation.
+A production-ready AI image generation platform built with React, TypeScript, Vite, Supabase, and Runway Gen-4. Features secure authentication, credit-based system, real-time generation tracking, and comprehensive admin controls.
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.5.3-blue)
 ![React](https://img.shields.io/badge/React-18.3.1-61dafb)
@@ -18,48 +18,59 @@ A production-ready authentication system built with React, TypeScript, Vite, and
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Database Setup](#database-setup)
-- [Creating Admin Users](#creating-admin-users)
+- [Edge Functions](#edge-functions)
 - [Usage](#usage)
 - [Project Structure](#project-structure)
 - [Security Features](#security-features)
+- [API Reference](#api-reference)
 - [Development](#development)
 - [Building for Production](#building-for-production)
-- [Contributing](#contributing)
 - [License](#license)
-- [Support](#support)
 
 ---
 
 ## Features
 
+### AI Image Generation
+- Generate high-quality images using Runway Gen-4 via Replicate API
+- Multiple aspect ratios (16:9, 9:16, 1:1, 4:3, 3:4, 21:9, 9:21)
+- Real-time generation status tracking
+- Automatic image upload to Supabase Storage
+- Generation history with filtering and search
+
+### Credit System
+- Credit-based usage model
+- Variable cost per generation based on aspect ratio (0.8 - 1.2 credits)
+- Default 10 credits for new users
+- Unlimited credits for admin users
+- Low balance warnings
+
 ### Authentication & Security
 - Secure email/password authentication with Supabase Auth
-- Rate limiting to prevent brute force attacks (5 attempts per 15 minutes)
-- Input validation and sanitization to prevent XSS attacks
-- Row Level Security (RLS) policies optimized for performance
-- Password strength requirements (uppercase, lowercase, numbers, min 8 characters)
-- Session management with automatic cleanup
+- Rate limiting (5 generations per minute, 2 concurrent max)
+- Row Level Security (RLS) policies on all tables
+- Input validation and sanitization
+- Protected routes with role-based access
 
 ### User Management
 - Role-based access control (Admin/Regular users)
-- Protected routes with authentication checks
-- User profile management with automatic triggers
-- Admin-only pages with authorization guards
+- User profile management
+- Admin dashboard with user statistics
+- Generation tracking per user
 
-### Code Quality
-- TypeScript for type safety
-- Clean architecture with separation of concerns
-- Centralized configuration management
-- Comprehensive error handling
-- Reusable components and utilities
-- SOLID principles implementation
+### Real-time Features
+- Live generation status updates
+- Automatic polling for active generations
+- Instant credit balance updates
+- Real-time UI feedback
 
 ### UI/UX
 - Responsive design for all screen sizes
 - Clean, modern interface with TailwindCSS
-- Loading states and error feedback
-- Accessible components
+- Loading states and progress indicators
 - Vietnamese language support
+- Image preview and download
+- Copy prompt functionality
 
 ---
 
@@ -73,13 +84,15 @@ A production-ready authentication system built with React, TypeScript, Vite, and
 - **TailwindCSS 3.4** - Utility-first CSS framework
 - **Lucide React** - Icon library
 
-### Backend & Database
+### Backend & Services
 - **Supabase** - Backend as a Service
   - PostgreSQL database
   - Authentication service
   - Row Level Security
-  - Real-time subscriptions
-  - Edge Functions support
+  - Storage for images
+  - Edge Functions
+- **Replicate** - AI model API (Runway Gen-4)
+- **Runway Gen-4** - Image generation model
 
 ### Development Tools
 - **ESLint** - Code linting
@@ -91,11 +104,13 @@ A production-ready authentication system built with React, TypeScript, Vite, and
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed:
+Before you begin, ensure you have the following:
 
 - **Node.js** (v18 or higher)
 - **npm** (v9 or higher) or **yarn**
 - **Supabase Account** - [Sign up here](https://supabase.com)
+- **Replicate Account** - [Sign up here](https://replicate.com)
+- **Replicate API Token** - Get from [Replicate Dashboard](https://replicate.com/account/api-tokens)
 - **Git** (for version control)
 
 ---
@@ -122,6 +137,7 @@ Create a `.env` file in the root directory:
 ```env
 VITE_SUPABASE_URL=your_supabase_project_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_SUPABASE_STORAGE_BUCKET=ai-generated-images
 ```
 
 ---
@@ -145,6 +161,27 @@ VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your_anon_key_here
+VITE_SUPABASE_STORAGE_BUCKET=ai-generated-images
+```
+
+### Replicate API Setup
+
+1. **Get Replicate API Token**
+   - Go to [Replicate Account](https://replicate.com/account/api-tokens)
+   - Create a new API token
+   - Copy the token (starts with `r8_`)
+
+2. **Set as Supabase Edge Function Secret**
+
+In Supabase Dashboard:
+- Go to **Edge Functions** → **Secrets**
+- Add new secret:
+  - Key: `REPLICATE_API_TOKEN`
+  - Value: Your Replicate API token
+
+Or via Supabase CLI:
+```bash
+supabase secrets set REPLICATE_API_TOKEN=r8_your_token_here
 ```
 
 ### Environment Variables
@@ -153,6 +190,8 @@ VITE_SUPABASE_ANON_KEY=your_anon_key_here
 |----------|-------------|----------|
 | `VITE_SUPABASE_URL` | Your Supabase project URL | Yes |
 | `VITE_SUPABASE_ANON_KEY` | Supabase anonymous/public API key | Yes |
+| `VITE_SUPABASE_STORAGE_BUCKET` | Storage bucket name for images | Yes |
+| `REPLICATE_API_TOKEN` | Replicate API token (Edge Function secret) | Yes |
 
 ---
 
@@ -160,88 +199,107 @@ VITE_SUPABASE_ANON_KEY=your_anon_key_here
 
 The project includes automated database migrations. Apply them in order:
 
-1. **Navigate to Supabase Dashboard**
-   - Go to SQL Editor
+1. **Navigate to Supabase Dashboard → SQL Editor**
 
 2. **Run migrations in order**
 
    Execute these migration files located in `supabase/migrations/`:
 
-   - `20251202170800_create_users_table.sql` - Creates users table with RLS policies
-   - `20251202165511_fix_security_issues.sql` - Optimizes RLS and security
+   - `20251202170800_create_users_table.sql` - Users table with RLS
+   - `20251202165511_fix_security_issues.sql` - Security optimizations
+   - `20251202174923_create_ai_generations_table.sql` - AI generations system
+   - `20251202180955_create_storage_policies_for_ai_images.sql` - Storage policies
 
 ### Database Schema
 
-The `users` table structure:
-
+**Users Table:**
 ```sql
 CREATE TABLE users (
-  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id uuid PRIMARY KEY REFERENCES auth.users(id),
   email text UNIQUE NOT NULL,
   full_name text NOT NULL DEFAULT '',
   is_admin boolean NOT NULL DEFAULT false,
+  credits numeric NOT NULL DEFAULT 10,
+  total_generations integer NOT NULL DEFAULT 0,
+  last_generation_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ```
 
-### Row Level Security (RLS)
+**AI Generations Table:**
+```sql
+CREATE TABLE ai_generations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id),
+  prompt text NOT NULL,
+  aspect_ratio text NOT NULL DEFAULT '16:9',
+  model_version text NOT NULL DEFAULT 'runway-gen-4',
+  image_url text,
+  replicate_prediction_id text,
+  status text NOT NULL DEFAULT 'starting',
+  error_message text,
+  cost_credits numeric NOT NULL DEFAULT 1.0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
+);
+```
 
-All tables have RLS enabled with optimized policies:
+### Storage Setup
 
-- Users can view their own profile
-- Users can update their own profile (except admin status)
-- Users can create their own profile (once)
-- Users can delete their own profile
-- Admin status can only be modified via direct database access
+1. **Create Storage Bucket**
 
----
+Storage bucket `ai-generated-images` is automatically created via migration.
 
-## Creating Admin Users
+2. **Verify Bucket**
 
-### Method 1: Using Supabase Dashboard (Recommended)
+In Supabase Dashboard → Storage:
+- Bucket name: `ai-generated-images`
+- Public: Yes
+- Policies: Automatically configured
 
-1. **Create user via Authentication**
-   - Go to Authentication → Users
-   - Click "Add User" → "Create new user"
-   - Enter email and password
-   - Click "Create User"
+### Creating Admin Users
 
-2. **Grant admin privileges**
-   - Go to Table Editor → Select `users` table
-   - Find the user by email
-   - Set `is_admin` to `true`
-   - Save changes
+**Method 1: Using Supabase Dashboard**
 
-### Method 2: Using SQL
+1. Go to Authentication → Users
+2. Create a new user
+3. Go to Table Editor → `users` table
+4. Set `is_admin = true` for the user
+
+**Method 2: Using SQL**
 
 ```sql
--- Step 1: Create user (Supabase Auth handles this)
--- You need to sign up through the app first, then:
-
--- Step 2: Grant admin privileges
+-- Grant admin privileges
 UPDATE users
 SET is_admin = true
 WHERE email = 'admin@example.com';
 ```
 
-### Method 3: Automated Script
+---
 
-Create a file `scripts/create-admin.sql`:
+## Edge Functions
 
-```sql
--- Update existing user to admin
-UPDATE users
-SET is_admin = true
-WHERE email = 'your-email@example.com';
+The project uses Supabase Edge Functions to proxy Replicate API calls (avoiding CORS issues).
 
--- Verify
-SELECT id, email, full_name, is_admin, created_at
-FROM users
-WHERE is_admin = true;
+### Deployed Functions
+
+**generate-image** - Handles all Replicate API interactions
+
+Endpoints:
+- `POST /functions/v1/generate-image/start` - Start image generation
+- `POST /functions/v1/generate-image/status` - Check generation status
+- `POST /functions/v1/generate-image/cancel` - Cancel generation
+
+### Edge Function Setup
+
+Edge function is automatically deployed. To manually redeploy:
+
+```bash
+supabase functions deploy generate-image
 ```
 
-Run in Supabase SQL Editor.
+**Important:** Ensure `REPLICATE_API_TOKEN` is set as an Edge Function secret.
 
 ---
 
@@ -255,86 +313,58 @@ Start the development server:
 npm run dev
 ```
 
-The application will be available at `http://localhost:5173`
+Application available at `http://localhost:5173`
 
-### User Registration & Login
+### Application Flow
 
-1. **Access the login page** at `/`
-2. **Create an account** (if registration is enabled)
-3. **Login** with email and password
-4. **Access protected routes** based on your role
-
-### Admin Access
-
-1. Create a user account
-2. Grant admin privileges using one of the methods above
-3. Login to access `/admin` route
+1. **Login/Register** - Access at `/`
+2. **Generate Images** - Navigate to `/generate`
+   - Enter your prompt
+   - Choose aspect ratio
+   - Click "Tạo ảnh"
+3. **View History** - Navigate to `/history`
+   - See all generations
+   - Filter by status
+   - Search by prompt
+   - Download images
+4. **Admin Panel** - Navigate to `/admin` (admin only)
+   - View user statistics
+   - Manage users
 
 ### Code Examples
 
-#### Using the Auth Context
+#### Generate an Image
 
 ```typescript
-import { useAuthContext } from './contexts/AuthContext';
+import { useRunwayContext } from './contexts/RunwayContext';
 
 function MyComponent() {
-  const { user, isAuthenticated, isLoading, login, logout, checkAdminStatus } = useAuthContext();
+  const { generateNewImage, credits } = useRunwayContext();
 
-  const handleLogin = async () => {
-    const result = await login({
-      email: 'user@example.com',
-      password: 'SecurePass123'
-    });
-
-    if (result.success) {
-      console.log('Logged in successfully');
-    } else {
-      console.error('Login failed:', result.error?.message);
-    }
+  const handleGenerate = async () => {
+    await generateNewImage(
+      'A beautiful sunset over mountains',
+      '16:9'
+    );
   };
-
-  if (isLoading) return <div>Loading...</div>;
 
   return (
     <div>
-      {isAuthenticated ? (
-        <div>
-          <p>Welcome, {user?.full_name}</p>
-          {checkAdminStatus() && <p>You are an admin!</p>}
-          <button onClick={logout}>Logout</button>
-        </div>
-      ) : (
-        <button onClick={handleLogin}>Login</button>
-      )}
+      <p>Available Credits: {credits?.credits}</p>
+      <button onClick={handleGenerate}>Generate Image</button>
     </div>
   );
 }
 ```
 
-#### Protected Routes
+#### Check User Credits
 
 ```typescript
-import { ProtectedRoute } from './components/ProtectedRoute';
+import { getUserCredits } from './services/runway.service';
 
-// Regular protected route
-<Route
-  path="/dashboard"
-  element={
-    <ProtectedRoute>
-      <DashboardPage />
-    </ProtectedRoute>
-  }
-/>
-
-// Admin-only route
-<Route
-  path="/admin"
-  element={
-    <ProtectedRoute requireAdmin={true}>
-      <AdminPage />
-    </ProtectedRoute>
-  }
-/>
+const credits = await getUserCredits(userId);
+console.log(`Credits: ${credits.credits}`);
+console.log(`Total Generations: ${credits.total_generations}`);
 ```
 
 ---
@@ -345,37 +375,48 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 ├── src/
 │   ├── components/          # Reusable UI components
 │   │   ├── ui/             # Generic UI components
-│   │   ├── InputField.tsx  # Form input component
-│   │   ├── LoginForm.tsx   # Login form component
+│   │   ├── CreditBalance.tsx
+│   │   ├── GenerationCard.tsx
+│   │   ├── ImageGenerationForm.tsx
+│   │   ├── InputField.tsx
+│   │   ├── LoginForm.tsx
 │   │   └── ProtectedRoute.tsx
 │   ├── config/             # Configuration files
 │   │   ├── auth.config.ts
 │   │   ├── profile.config.ts
 │   │   ├── rateLimit.config.ts
+│   │   ├── runway.config.ts
 │   │   ├── supabase.ts
 │   │   └── validation.config.ts
 │   ├── contexts/           # React contexts
-│   │   └── AuthContext.tsx
+│   │   ├── AuthContext.tsx
+│   │   └── RunwayContext.tsx
 │   ├── pages/              # Page components
 │   │   ├── AdminPage.tsx
+│   │   ├── GenerationHistoryPage.tsx
+│   │   ├── ImageGeneratorPage.tsx
 │   │   └── LoginPage.tsx
 │   ├── services/           # Business logic services
 │   │   ├── auth.service.ts
-│   │   └── profile.service.ts
+│   │   ├── profile.service.ts
+│   │   └── runway.service.ts
 │   ├── types/              # TypeScript type definitions
 │   │   ├── auth.types.ts
 │   │   ├── profile.types.ts
 │   │   ├── rateLimit.types.ts
+│   │   ├── runway.types.ts
 │   │   └── validation.types.ts
 │   ├── utils/              # Utility functions
 │   │   ├── rateLimit.utils.ts
+│   │   ├── runway.utils.ts
 │   │   └── validation.utils.ts
 │   ├── constants/          # Application constants
-│   │   └── index.ts
 │   ├── App.tsx             # Root component
 │   ├── main.tsx            # Application entry point
 │   └── index.css           # Global styles
 ├── supabase/
+│   ├── functions/          # Edge Functions
+│   │   └── generate-image/
 │   └── migrations/         # Database migrations
 ├── public/                 # Static assets
 ├── .env                    # Environment variables
@@ -390,31 +431,78 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 ## Security Features
 
 ### Authentication Security
-- Password strength validation
-- Email format validation and sanitization
-- XSS protection through input sanitization
-- CSRF protection via Supabase Auth tokens
+- Email/password authentication via Supabase
+- Session management with automatic cleanup
+- Protected routes with role-based access
+- Input validation and sanitization
 
 ### Rate Limiting
-- 5 login attempts per 15-minute window
-- 30-minute lockout after exceeding limit
-- Per-email address tracking
-- Automatic cleanup of expired attempts
+- 5 generations per minute per user
+- Maximum 2 concurrent generations
+- Login rate limiting (5 attempts per 15 minutes)
+- Automatic cleanup of expired limits
 
 ### Database Security
 - Row Level Security (RLS) on all tables
-- Optimized RLS policies with `(SELECT auth.uid())`
+- Users can only access their own data
+- Admin privileges protected
 - Secure function search paths
-- Admin privileges protected from user modification
-- Automatic user profile creation
-- Cascading deletes for data integrity
+- Credits system with fraud prevention
 
-### Code Security
-- Type-safe operations with TypeScript
-- Input validation at multiple layers
-- Error handling without exposing sensitive data
-- Secure environment variable management
-- HTTPS-only communication with Supabase
+### API Security
+- Edge Functions proxy all external API calls
+- No API tokens exposed to client
+- JWT verification on all requests
+- CORS properly configured
+
+### Image Storage Security
+- Users can only upload to their own folder
+- Public read access for sharing
+- Admin can manage all files
+- File type validation
+
+---
+
+## API Reference
+
+### Runway Service API
+
+#### `generateImage(userId, prompt, aspectRatio)`
+Starts a new image generation.
+
+**Parameters:**
+- `userId` (string) - User ID
+- `prompt` (string) - Text prompt
+- `aspectRatio` (AspectRatio) - Aspect ratio
+
+**Returns:** `Promise<GenerationResult>`
+
+#### `getUserGenerations(userId, filters?)`
+Gets user's generation history.
+
+**Parameters:**
+- `userId` (string) - User ID
+- `filters` (GenerationFilters, optional) - Filter options
+
+**Returns:** `Promise<AIGeneration[]>`
+
+#### `checkUserCredits(userId, requiredCredits)`
+Checks if user has sufficient credits.
+
+**Parameters:**
+- `userId` (string) - User ID
+- `requiredCredits` (number) - Credits needed
+
+**Returns:** `Promise<CreditCheckResult>`
+
+#### `deleteGeneration(generationId, userId)`
+Deletes a generation and its image.
+
+**Parameters:**
+- `generationId` (string) - Generation ID
+- `userId` (string) - User ID
+
+**Returns:** `Promise<boolean>`
 
 ---
 
@@ -439,22 +527,14 @@ npm run lint
 npm run typecheck
 ```
 
-### Code Style Guidelines
-
-- Use TypeScript for all new files
-- Follow SOLID principles
-- Write self-documenting code with clear naming
-- Keep functions small and focused
-- Use proper error handling
-- Add types for all function parameters and returns
-
 ### Adding New Features
 
 1. Create types in `src/types/`
 2. Add configuration in `src/config/`
 3. Implement service logic in `src/services/`
 4. Create UI components in `src/components/`
-5. Update routes in `App.tsx`
+5. Add pages in `src/pages/`
+6. Update routes in `App.tsx`
 
 ---
 
@@ -474,60 +554,28 @@ npm run preview
 
 3. **Deploy to hosting platform**
 
-The `dist/` folder contains the production-ready files.
+The `dist/` folder contains production-ready files.
 
-### Deployment Options
+### Deployment Checklist
+
+- [ ] Set environment variables on hosting platform
+- [ ] Apply all database migrations
+- [ ] Configure Edge Function secrets
+- [ ] Create storage bucket with policies
+- [ ] Set up custom domain (optional)
+- [ ] Configure CORS if needed
+
+### Recommended Hosting
 
 - **Vercel** - Zero configuration deployment
 - **Netlify** - Git-based deployment
 - **Supabase Hosting** - Integrated with backend
-- **AWS S3 + CloudFront** - Custom infrastructure
-
-### Environment Variables for Production
-
-Ensure these are set in your hosting platform:
-
-```env
-VITE_SUPABASE_URL=your_production_supabase_url
-VITE_SUPABASE_ANON_KEY=your_production_anon_key
-```
-
----
-
-## Contributing
-
-We welcome contributions! Please follow these guidelines:
-
-### Getting Started
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes
-4. Run tests and linting
-5. Commit with clear messages: `git commit -m 'Add amazing feature'`
-6. Push to your fork: `git push origin feature/amazing-feature`
-7. Open a Pull Request
-
-### Code Standards
-
-- Follow existing code style
-- Write TypeScript (no `any` types)
-- Add proper error handling
-- Update documentation
-- Include tests when applicable
-
-### Pull Request Process
-
-1. Update README.md with details of changes if needed
-2. Ensure all tests pass
-3. Update version numbers following SemVer
-4. Get approval from maintainers
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - see below for details:
+This project is licensed under the MIT License.
 
 ```
 MIT License
@@ -555,61 +603,33 @@ SOFTWARE.
 
 ---
 
-## Support
-
-### Getting Help
-
-- **Documentation**: Check this README and code comments
-- **Issues**: [Open an issue](https://github.com/your-repo/issues) on GitHub
-- **Discussions**: [GitHub Discussions](https://github.com/your-repo/discussions)
-
-### Common Issues
-
-**Login fails with "Rate limit exceeded"**
-- Wait 30 minutes and try again
-- Check if email is correct
-- Contact admin to reset rate limit
-
-**Cannot access admin page**
-- Verify `is_admin` is set to `true` in database
-- Check browser console for errors
-- Clear browser cache and cookies
-
-**Database connection errors**
-- Verify `.env` file has correct credentials
-- Check Supabase project status
-- Ensure database migrations have been applied
-
-### Contact
-
-- **Email**: support@example.com
-- **GitHub**: [@your-username](https://github.com/your-username)
-- **Twitter**: [@your-handle](https://twitter.com/your-handle)
-
----
-
-## Acknowledgments
-
-- [Supabase](https://supabase.com) - Backend infrastructure
-- [Vite](https://vitejs.dev) - Build tool
-- [React](https://react.dev) - UI framework
-- [TailwindCSS](https://tailwindcss.com) - Styling
-- [Lucide](https://lucide.dev) - Icons
-
----
-
 ## Changelog
 
-### Version 1.0.1 (2025-12-02)
+### Version 2.0.0 (2025-12-02)
 
-**Changed**
-- Consolidated database migrations from 4 files to 2 files
-- Removed redundant table rename migrations
-- Updated migration documentation
+**Added**
+- AI image generation with Runway Gen-4
+- Credit-based usage system
+- Multiple aspect ratio options
+- Real-time generation tracking
+- Image storage in Supabase
+- Generation history with search/filter
+- Edge Functions for API proxying
+- Rate limiting for generations
+- Download and copy features
 
-**Migrations**
-- `20251202170800_create_users_table.sql` - Initial users table setup
-- `20251202165511_fix_security_issues.sql` - Security optimizations
+**Database**
+- Added `ai_generations` table
+- Added credits system to users table
+- Added storage bucket and policies
+- Added generation statistics tracking
+
+**UI/UX**
+- Image generator page
+- Generation history page
+- Credit balance widget
+- Generation cards with status
+- Real-time progress indicators
 
 ### Version 1.0.0 (2024-12-02)
 
@@ -617,17 +637,9 @@ SOFTWARE.
 - Initial release
 - User authentication system
 - Admin role management
-- Rate limiting
-- Input validation
 - Protected routes
 - Responsive UI
 
-**Security**
-- Optimized RLS policies
-- Secure function search paths
-- XSS protection
-- Rate limiting implementation
-
 ---
 
-Made with ❤️ by the development team
+Made with ❤️ using Runway Gen-4, Supabase, and React
