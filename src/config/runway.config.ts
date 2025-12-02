@@ -109,11 +109,3 @@ export function calculateCost(aspectRatio: AspectRatio): number {
   const option = getAspectRatioOption(aspectRatio);
   return option?.cost || 1.0;
 }
-
-export function getReplicateAPIToken(): string {
-  const token = import.meta.env.VITE_REPLICATE_API_TOKEN;
-  if (!token || token === 'your_replicate_api_token_here') {
-    throw new Error('VITE_REPLICATE_API_TOKEN is not configured');
-  }
-  return token;
-}

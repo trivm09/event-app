@@ -1,9 +1,7 @@
-import Replicate from 'replicate';
 import { supabase } from '../config/supabase';
 import {
   RUNWAY_CONFIG,
   calculateCost,
-  getReplicateAPIToken,
   ERROR_MESSAGES,
   STORAGE_CONFIG,
 } from '../config/runway.config';
@@ -20,14 +18,26 @@ import type {
   AspectRatio,
 } from '../types/runway.types';
 
-let replicateClient: Replicate | null = null;
+const EDGE_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-image`;
 
-function getReplicateClient(): Replicate {
-  if (!replicateClient) {
-    const token = getReplicateAPIToken();
-    replicateClient = new Replicate({ auth: token });
+async function callEdgeFunction(path: string, body: unknown): Promise<Response> {
+  const { data: { session } } = await supabase.auth.getSession();
+
+  const response = await fetch(`${EDGE_FUNCTION_URL}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${session?.access_token || ''}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Edge function call failed');
   }
-  return replicateClient;
+
+  return response;
 }
 
 export async function checkUserCredits(userId: string, requiredCredits: number): Promise<CreditCheckResult> {
@@ -145,21 +155,16 @@ export async function startReplicatePrediction(
   aspectRatio: AspectRatio
 ): Promise<PredictionResult> {
   try {
-    const replicate = getReplicateClient();
-
-    const prediction = await replicate.predictions.create({
-      model: 'black-forest-labs/flux-pro',
-      input: {
-        prompt,
-        aspect_ratio: aspectRatio,
-        output_format: 'png',
-        output_quality: 90,
-      },
+    const response = await callEdgeFunction('/start', {
+      prompt,
+      aspect_ratio: aspectRatio,
     });
+
+    const prediction = await response.json();
 
     return {
       success: true,
-      prediction: prediction as unknown as ReplicatePrediction,
+      prediction: prediction as ReplicatePrediction,
     };
   } catch (error) {
     console.error('Error starting Replicate prediction:', error);
@@ -203,12 +208,15 @@ export async function updateGeneration(
 
 export async function checkPredictionStatus(predictionId: string): Promise<PredictionResult> {
   try {
-    const replicate = getReplicateClient();
-    const prediction = await replicate.predictions.get(predictionId);
+    const response = await callEdgeFunction('/status', {
+      predictionId,
+    });
+
+    const prediction = await response.json();
 
     return {
       success: true,
-      prediction: prediction as unknown as ReplicatePrediction,
+      prediction: prediction as ReplicatePrediction,
     };
   } catch (error) {
     console.error('Error checking prediction status:', error);
@@ -466,8 +474,9 @@ export async function cancelGeneration(generationId: string): Promise<boolean> {
       return false;
     }
 
-    const replicate = getReplicateClient();
-    await replicate.predictions.cancel(generation.replicate_prediction_id);
+    await callEdgeFunction('/cancel', {
+      predictionId: generation.replicate_prediction_id,
+    });
 
     await updateGeneration(generationId, {
       status: 'cancelled',
